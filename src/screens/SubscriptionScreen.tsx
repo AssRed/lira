@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Linking,
@@ -23,6 +23,7 @@ import { useSubscription } from '../hooks/useSubscription';
 import { RootStackParamList } from '../navigation';
 import { SERIF_STACK, WaveBackground } from '../components/WaveBackground';
 import { ThemeColors } from '../theme';
+import { getOrCreateDeviceId } from '../utils/deviceId';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -171,11 +172,23 @@ export const SubscriptionScreen: React.FC = () => {
     isPremium,
     daysLeft,
     activate,
+    refreshFromBackend,
   } = useSubscription();
   const navigation = useNavigation<Nav>();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [deviceId, setDeviceId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getOrCreateDeviceId().then((id) => {
+      if (!cancelled) setDeviceId(id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const syncInfo = useMemo(() => {
     const starts = findPeriodStarts(data.logs);
@@ -241,10 +254,31 @@ export const SubscriptionScreen: React.FC = () => {
       navigation.navigate('ManageSubscription');
       return;
     }
-    const url = 'https://t.me/lowerBsk24_bot?start=premium';
+    // Append the device id so the bot can bind it to the Telegram user
+    // before invoicing — the activation then flows back via
+    // /v1/subscription/by-device without needing the manual 8-char code.
+    const start = deviceId ? `premium_${deviceId}` : 'premium';
+    const url = `https://t.me/lowerBsk24_bot?start=${start}`;
     Linking.openURL(url).catch(() => {
       Alert.alert('Не получилось открыть Telegram', url);
     });
+  };
+
+  const onPressLinkDevice = async () => {
+    const id = deviceId ?? (await getOrCreateDeviceId());
+    setDeviceId(id);
+    const url = `https://t.me/lowerBsk24_bot?start=link_${id}`;
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Не получилось открыть Telegram', url);
+      return;
+    }
+    // Give the bot a few seconds to bind, then refresh — usually enough
+    // for a user who just authorised in Telegram and came back.
+    setTimeout(() => {
+      void refreshFromBackend();
+    }, 4000);
   };
 
   const onActivate = async () => {
@@ -385,9 +419,29 @@ export const SubscriptionScreen: React.FC = () => {
         </View>
 
         <View style={styles.codeCard}>
+          <Text style={styles.codeTitle}>Авто-привязка через Telegram</Text>
+          <Text style={styles.codeHint}>
+            Самый быстрый способ. Один раз нажми «Привязать» — мы откроем бота
+            и привяжем это устройство к твоему Telegram. После любой оплаты
+            подписка появится в приложении автоматически, без ввода кода.
+          </Text>
+          <Pressable
+            style={styles.activateButton}
+            onPress={() => {
+              void onPressLinkDevice();
+            }}
+          >
+            <Text style={styles.activateButtonText}>
+              Привязать через Telegram
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.codeCard}>
           <Text style={styles.codeTitle}>Код активации</Text>
           <Text style={styles.codeHint}>
-            Бот пришлёт его после оплаты. Введи код, чтобы активировать подписку в приложении.
+            Если автопривязка по какой-то причине не сработала — введи 8-символьный
+            код из сообщения бота вручную.
           </Text>
           <TextInput
             style={styles.codeInput}

@@ -9,7 +9,7 @@
     "web": "expo start --web",
     "export:web": "expo export --platform web && node scripts/postexport-web.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/cycle.test.ts test/pin.test.ts test/cycleCode.test.ts"
+    "test": "tsx --test test/cycle.test.ts test/pin.test.ts test/cycleCode.test.ts test/subscriptionDiff.test.ts"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
