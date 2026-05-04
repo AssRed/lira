@@ -376,10 +376,50 @@ export const SettingsScreen: React.FC = () => {
             />
           </View>
           <View style={styles.row}>
+            <Text style={styles.rowLabel}>
+              {t('settings.notifyPeriodStart')}
+            </Text>
+            <Switch
+              value={data.settings.notifyPeriodStart}
+              onValueChange={(v) => updateSettings({ notifyPeriodStart: v })}
+              trackColor={{ true: colors.primary, false: colors.border }}
+            />
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>
+              {t('settings.notifyOvulationDay')}
+            </Text>
+            <Switch
+              value={data.settings.notifyOvulationDay}
+              onValueChange={(v) => updateSettings({ notifyOvulationDay: v })}
+              trackColor={{ true: colors.primary, false: colors.border }}
+            />
+          </View>
+          <View style={styles.row}>
             <Text style={styles.rowLabel}>{t('settings.notifyFertile')}</Text>
             <Switch
               value={data.settings.notifyFertile}
               onValueChange={(v) => updateSettings({ notifyFertile: v })}
+              trackColor={{ true: colors.primary, false: colors.border }}
+            />
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>
+              {t('settings.notifyLatePeriod')}
+            </Text>
+            <Switch
+              value={data.settings.notifyLatePeriod}
+              onValueChange={(v) => updateSettings({ notifyLatePeriod: v })}
+              trackColor={{ true: colors.primary, false: colors.border }}
+            />
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>
+              {t('settings.notifyDailyLog')}
+            </Text>
+            <Switch
+              value={data.settings.notifyDailyLog}
+              onValueChange={(v) => updateSettings({ notifyDailyLog: v })}
               trackColor={{ true: colors.primary, false: colors.border }}
             />
           </View>

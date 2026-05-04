@@ -290,13 +290,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Keep scheduled local notifications in sync with predictions / settings.
   useEffect(() => {
     if (!ready) return;
-    void rescheduleNotifications(predictions, data.settings, translate);
+    void rescheduleNotifications(
+      predictions,
+      data.settings,
+      data.logs,
+      translate,
+    );
   }, [
     ready,
     predictions,
     data.settings.notifyPrePeriod,
+    data.settings.notifyPeriodStart,
+    data.settings.notifyOvulationDay,
     data.settings.notifyFertile,
+    data.settings.notifyLatePeriod,
+    data.settings.notifyDailyLog,
     data.settings,
+    data.logs,
   ]);
 
   // Subscription is now activated locally via Telegram-bot-issued codes
