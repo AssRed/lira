@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from html import escape
 from typing import TYPE_CHECKING, Mapping, Sequence
 
@@ -15,6 +15,42 @@ if TYPE_CHECKING:
     from bot.models import Profile
 
 log = logging.getLogger(__name__)
+
+
+# Russian month names in genitive case (for "5 марта" style dates).
+_RU_MONTHS_GEN = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+
+
+def _ru_date(d: date) -> str:
+    """Format a date as `5 марта 2026` (genitive month, RU)."""
+    return f"{d.day} {_RU_MONTHS_GEN[d.month - 1]} {d.year}"
+
+
+def _format_cycle_window(
+    last_period_start: date | None,
+    cycle_length_days: int | None,
+    period_length_days: int | None,
+) -> tuple[str | None, str | None]:
+    """Return (period_window, cycle_window) — Russian date-range strings.
+
+    `period_window`: dates the user is bleeding (e.g. "5 марта — 9 марта 2026").
+    `cycle_window`: full cycle from last period start to the day before the
+    next expected period (e.g. "5 марта — 1 апреля 2026").
+    Either entry is None when the underlying field is missing — admin
+    string falls back to the legacy `28 дн., месячные 5 дн.` line.
+    """
+    period: str | None = None
+    cycle: str | None = None
+    if last_period_start and period_length_days:
+        end = last_period_start + timedelta(days=max(period_length_days - 1, 0))
+        period = f"{_ru_date(last_period_start)} — {_ru_date(end)}"
+    if last_period_start and cycle_length_days:
+        end = last_period_start + timedelta(days=max(cycle_length_days - 1, 0))
+        cycle = f"{_ru_date(last_period_start)} — {_ru_date(end)}"
+    return period, cycle
 
 
 # Human labels for option ids stored on Profile.
@@ -139,14 +175,29 @@ def format_full_profile(user_tg: "TGUser", profile: "Profile") -> str:
         )
     elif profile.flow_app_code:
         lines.append(f"• Код Lira: <code>{escape(profile.flow_app_code)}</code>")
-    if profile.last_period_start:
-        lines.append(
-            f"• Последние месячные: <b>{profile.last_period_start:%d.%m.%Y}</b>"
-        )
-    lines.append(
-        f"• Цикл: {profile.cycle_length_days or '—'} дн., "
-        f"месячные {profile.period_length_days or '—'} дн."
+    period_window, cycle_window = _format_cycle_window(
+        profile.last_period_start,
+        profile.cycle_length_days,
+        profile.period_length_days,
     )
+    if period_window:
+        lines.append(f"• Месячные: <b>{escape(period_window)}</b>")
+    elif profile.last_period_start:
+        # Fall back to a single-day line if we don't know the period
+        # length — better than dropping the date entirely.
+        lines.append(
+            f"• Последние месячные: <b>{escape(_ru_date(profile.last_period_start))}</b>"
+        )
+    if cycle_window:
+        lines.append(
+            f"• Цикл: <b>{escape(cycle_window)}</b> "
+            f"({profile.cycle_length_days} дн.)"
+        )
+    else:
+        lines.append(
+            f"• Цикл: {profile.cycle_length_days or '—'} дн., "
+            f"месячные {profile.period_length_days or '—'} дн."
+        )
     lines.append("")
     lines.append("<b>Шаг 2. Гигиена</b>")
     lines.append(f"• Прокладки: {_list(profile.hygiene_pads, PADS_LABELS)}")

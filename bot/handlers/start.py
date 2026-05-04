@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import F, Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     InlineKeyboardButton,
@@ -13,7 +13,7 @@ from aiogram.types import (
 )
 
 from bot.db import session_scope
-from bot.services.users import get_or_create_user
+from bot.services.users import bind_device_id, get_or_create_user, is_valid_device_id
 from bot.states import Onboarding
 
 log = logging.getLogger(__name__)
@@ -61,14 +61,73 @@ def _welcome_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-@router.message(CommandStart(deep_link=True), F.text.regexp(r"^/start\s+premium\b"))
-async def on_start_premium(message: Message, state: FSMContext) -> None:
-    """Deep link from the app: tariff is preselected as Premium → straight to invoice."""
+def _parse_device_suffix(args: str | None, prefix: str) -> str | None:
+    """Pull the device id out of a `<prefix>_<device_id>` start argument.
+
+    Returns None if the argument is missing, doesn't start with the prefix,
+    or carries an unparseable / oversized device id.
+    """
+    if not args:
+        return None
+    raw = args.strip()
+    if not raw.startswith(f"{prefix}_"):
+        return None
+    candidate = raw[len(prefix) + 1 :]
+    if not is_valid_device_id(candidate):
+        return None
+    return candidate
+
+
+@router.message(CommandStart(deep_link=True), F.text.regexp(r"^/start\s+premium(_[A-Za-z0-9._-]{8,64})?\b"))
+async def on_start_premium(
+    message: Message, state: FSMContext, command: CommandObject
+) -> None:
+    """Deep link from the app: tariff is preselected as Premium → straight to invoice.
+
+    Supports `/start premium` (legacy, no device binding) and
+    `/start premium_<device_id>` which binds the device before invoicing,
+    so polling /v1/subscription/by-device picks up the activation
+    automatically once payment is finalised.
+    """
     await state.clear()
     if message.from_user is not None:
         async with session_scope() as session:
-            await get_or_create_user(session, message.from_user)
+            user = await get_or_create_user(session, message.from_user)
+            device_id = _parse_device_suffix(command.args, "premium")
+            if device_id is not None:
+                await bind_device_id(session, user, device_id)
     await _send_premium_invoice(message, state)
+
+
+@router.message(CommandStart(deep_link=True), F.text.regexp(r"^/start\s+link_[A-Za-z0-9._-]{8,64}\b"))
+async def on_start_link(
+    message: Message, state: FSMContext, command: CommandObject
+) -> None:
+    """Bind a Lira install to this Telegram user without going to checkout.
+
+    Used when the user wants to pre-authorise the device so that any
+    *existing* paid subscription on this Telegram account starts pushing
+    state to the app immediately.
+    """
+    await state.clear()
+    if message.from_user is None:
+        return
+    device_id = _parse_device_suffix(command.args, "link")
+    if device_id is None:
+        await message.answer(
+            "Не получилось распознать код устройства. Открой приложение "
+            "Lira → «Подписка» → «Привязать через Telegram» ещё раз."
+        )
+        return
+    async with session_scope() as session:
+        user = await get_or_create_user(session, message.from_user)
+        await bind_device_id(session, user, device_id)
+    await message.answer(
+        "Готово! Устройство привязано к этому Telegram-аккаунту 🌸\n\n"
+        "Если у тебя уже есть активная подписка — приложение подхватит её "
+        "в течение пары минут. После следующей оплаты подписка тоже "
+        "включится автоматически — без ввода кода."
+    )
 
 
 @router.callback_query(F.data == "premium:buy")

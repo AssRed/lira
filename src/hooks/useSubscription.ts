@@ -1,10 +1,20 @@
 import { differenceInCalendarDays, isBefore, parseISO } from 'date-fns';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { useApp } from '../AppContext';
 import { DEFAULT_SUBSCRIPTION, Subscription, SubscriptionTier } from '../types';
-import { activateCode } from '../utils/activation';
+import {
+  activateCode,
+  fetchSubscriptionByDevice,
+} from '../utils/activation';
+import { getOrCreateDeviceId } from '../utils/deviceId';
+import { isNewerSubscription } from '../utils/subscriptionDiff';
 
 export type SubscriptionType = 'premium' | 'basic_box' | 'vip_box' | 'none';
+
+export type RefreshOutcome =
+  | { ok: true; updated: boolean }
+  | { ok: false; reason: 'not_bound' | 'no_subscription' | 'invalid_device' | 'network' };
 
 export interface UseSubscriptionApi {
   subscription: Subscription;
@@ -27,6 +37,10 @@ export interface UseSubscriptionApi {
     | { ok: true; tier: SubscriptionTier; expires: string }
     | { ok: false; reason: 'empty' | 'invalid' | 'network' }
   >;
+  /** Auto-sync: poll the FlowCare API for the latest subscription bound
+   * to this device's id and mirror it locally. Returns whether anything
+   * actually changed. Safe to call repeatedly. */
+  refreshFromBackend: () => Promise<RefreshOutcome>;
 }
 
 const isActiveNow = (sub: Subscription, now = new Date()): boolean => {
@@ -48,17 +62,33 @@ const computeDaysLeft = (sub: Subscription, now = new Date()): number => {
   }
 };
 
+const productIdFor = (tariff: SubscriptionTier): string =>
+  tariff === 'vip'
+    ? 'vip_monthly'
+    : tariff === 'premium'
+      ? 'premium_monthly'
+      : tariff === 'basic'
+        ? 'basic_monthly'
+        : 'free';
+
+/** Polling interval for the auto-sync refresh while the app is foregrounded. */
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
 /**
  * Subscription state hook.
  *
- * Source of truth: the FlowCare backend (`./api/`) which is fed by
- * the Telegram bot (`./bot/`). The user pastes the bot-issued
- * activation code into the app; we POST it to /v1/activate and
- * mirror the resulting tier + expires locally.
+ * Source of truth: the FlowCare backend (`./api/`) which is fed by the
+ * Telegram bot (`./bot/`). The user can either paste the bot-issued
+ * 8-char activation code (manual) or link their device once via
+ * `/start link_<device_id>` and let the app pull subscription state
+ * automatically (auto-sync). Both paths converge on the same local
+ * Subscription object.
  */
 export const useSubscription = (): UseSubscriptionApi => {
   const { data, updateSubscription } = useApp();
   const sub = data.subscription;
+  const subRef = useRef(sub);
+  subRef.current = sub;
 
   useEffect(() => {
     if (sub.tier !== 'free' && sub.renewsAt && !isActiveNow(sub)) {
@@ -66,25 +96,69 @@ export const useSubscription = (): UseSubscriptionApi => {
     }
   }, [sub, updateSubscription]);
 
+  const refreshFromBackend = useCallback<UseSubscriptionApi['refreshFromBackend']>(
+    async () => {
+      const deviceId = await getOrCreateDeviceId();
+      const result = await fetchSubscriptionByDevice(deviceId);
+      if (!result.ok) return { ok: false, reason: result.reason };
+      const remote = result.data;
+      const current = subRef.current;
+      if (!isNewerSubscription(current, remote)) {
+        return { ok: true, updated: false };
+      }
+      const renewsAtIso = `${remote.expires}T00:00:00.000Z`;
+      const startedIso = `${remote.started_at}T00:00:00.000Z`;
+      const nowIso = new Date().toISOString();
+      await updateSubscription({
+        tier: remote.tier,
+        productId: productIdFor(remote.tier),
+        startedAt: startedIso,
+        renewsAt: renewsAtIso,
+        cancelled: false,
+        lastSyncedAt: nowIso,
+        activationCode: remote.activation_code ?? current.activationCode,
+      });
+      return { ok: true, updated: true };
+    },
+    [updateSubscription],
+  );
+
+  // Auto-sync: refresh on mount, on foreground, and every 5 min while
+  // foregrounded. Errors (network / not_bound) are swallowed — the UI
+  // should never block on this.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      void refreshFromBackend();
+    };
+    tick();
+    const interval = setInterval(tick, REFRESH_INTERVAL_MS);
+    const onChange = (next: AppStateStatus) => {
+      if (next === 'active') tick();
+    };
+    const sub = AppState.addEventListener('change', onChange);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      sub.remove();
+    };
+  }, [refreshFromBackend]);
+
   const activate = useCallback<UseSubscriptionApi['activate']>(
     async (code) => {
       const trimmed = code.trim();
       if (!trimmed) return { ok: false, reason: 'empty' };
-      const res = await activateCode(trimmed);
+      const deviceId = await getOrCreateDeviceId();
+      const res = await activateCode(trimmed, deviceId);
       if (!res.valid || !res.tariff || !res.expires) {
         return { ok: false, reason: 'invalid' };
       }
       const renewsAtIso = `${res.expires}T00:00:00.000Z`;
       const nowIso = new Date().toISOString();
-      const productId =
-        res.tariff === 'vip'
-          ? 'vip_monthly'
-          : res.tariff === 'premium'
-            ? 'premium_monthly'
-            : 'basic_monthly';
       await updateSubscription({
         tier: res.tariff,
-        productId,
+        productId: productIdFor(res.tariff),
         startedAt: nowIso,
         renewsAt: renewsAtIso,
         cancelled: false,
@@ -123,5 +197,6 @@ export const useSubscription = (): UseSubscriptionApi => {
     isBoxActive,
     daysLeft: computeDaysLeft(sub),
     activate,
+    refreshFromBackend,
   };
 };

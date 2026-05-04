@@ -21,6 +21,12 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(64))
     first_name: Mapped[str | None] = mapped_column(String(128))
     language_code: Mapped[str | None] = mapped_column(String(8))
+    # Auto-sync: device_id stamped by the Lira app via /start link_<id> or
+    # /start premium_<id>. Lets the API resolve the user (and its latest
+    # subscription) without the manual 8-char activation code.
+    device_id: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True
+    )
 
     profile: Mapped["Profile | None"] = relationship(
         "Profile", back_populates="user", uselist=False, cascade="all, delete-orphan"
