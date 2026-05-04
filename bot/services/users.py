@@ -59,18 +59,41 @@ async def bind_device_id(
 
     The device id is unique across the table — when the same Lira install
     is re-linked to a different Telegram account, we re-point the row.
+
+    Race-safe: when two concurrent ``/start link_<id>`` updates arrive
+    for the same device id (e.g. the user opens a second Telegram client
+    on the same device, or smashes the button twice), one of them will
+    hit the UNIQUE constraint on ``users.device_id``. We catch that and
+    return ``False`` instead of letting the IntegrityError propagate up
+    to the bot middleware (which would 500 the update and leave the user
+    staring at a broken /start).
     """
     if not is_valid_device_id(device_id):
         return False
+    # Re-read user.device_id from the DB before the early return — a
+    # concurrent transaction may have cleared/changed it since this
+    # User object was loaded by get_or_create_user.
+    await session.refresh(user, attribute_names=["device_id"])
     if user.device_id == device_id:
         return False
     other_stmt = select(User).where(User.device_id == device_id)
     other = (await session.execute(other_stmt)).scalar_one_or_none()
     if other is not None and other.id != user.id:
         other.device_id = None
-        await session.flush()
+        try:
+            await session.flush()
+        except IntegrityError:
+            await session.rollback()
+            return False
     user.device_id = device_id
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        # Lost the race to another transaction; the in-memory change is
+        # rolled back so the rest of the handler runs against a clean
+        # session state.
+        await session.rollback()
+        return False
     return True
 
 
