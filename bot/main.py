@@ -42,6 +42,12 @@ async def init_db() -> None:
         # ephemeral sqlite DB on the dev VM).
         await _ensure_column(conn, "profiles", "last_period_start", "DATE")
         await _ensure_column(conn, "profiles", "cycle_sync_code", "VARCHAR(16)")
+        await _ensure_column(conn, "users", "device_id", "VARCHAR(64)")
+        # Unique index on the new column — backed by the model declaration but
+        # SQLAlchemy create_all won't add it to a pre-existing table.
+        await conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_device_id ON users(device_id)"
+        )
     async with session_scope() as session:
         added = await seed_catalog(session)
         if added:
