@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
-import { addDays, parseISO, startOfDay } from 'date-fns';
 import type { CyclePredictions } from './cycle';
-import type { Settings } from './types';
+import type { DayLog, Settings } from './types';
+import { buildNotificationPlan, NotificationItem } from './notificationPlan';
 
 // expo-notifications imports must be wrapped because the package is unavailable
 // in pure web SSR contexts; we lazy-load it.
@@ -21,44 +21,15 @@ const loadNotif = async (): Promise<typeof import('expo-notifications') | null> 
 
 const TAG = 'cycletracker.scheduled';
 
-export interface NotificationPlan {
-  prePeriodAt: Date | null;
-  fertileStartAt: Date | null;
-}
-
-/** Build the next future-only notification fire times based on the latest
- *  predictions. Uses 09:00 local on the given day. */
-export const buildNotificationPlan = (
-  predictions: CyclePredictions,
-  settings: Settings,
-  now: Date = new Date(),
-): NotificationPlan => {
-  const at9 = (iso: string): Date => {
-    const d = startOfDay(parseISO(iso));
-    d.setHours(9, 0, 0, 0);
-    return d;
-  };
-
-  let prePeriodAt: Date | null = null;
-  if (settings.notifyPrePeriod && predictions.nextPeriodStart) {
-    const fire = addDays(at9(predictions.nextPeriodStart), -1);
-    if (fire.getTime() > now.getTime()) prePeriodAt = fire;
-  }
-
-  let fertileStartAt: Date | null = null;
-  if (settings.notifyFertile && predictions.fertileStart) {
-    const fire = at9(predictions.fertileStart);
-    if (fire.getTime() > now.getTime()) fertileStartAt = fire;
-  }
-
-  return { prePeriodAt, fertileStartAt };
-};
+export type { NotificationItem, NotificationKey } from './notificationPlan';
+export { buildNotificationPlan } from './notificationPlan';
 
 export const isNotificationsSupported = (): boolean => isNative;
 
 export interface ScheduleResult {
   ok: boolean;
   reason?: 'unsupported' | 'denied' | 'error';
+  scheduledCount?: number;
 }
 
 /** Cancel any of our previous reminders and schedule the new ones based on
@@ -66,26 +37,33 @@ export interface ScheduleResult {
 export const rescheduleNotifications = async (
   predictions: CyclePredictions,
   settings: Settings,
+  logs: Record<string, DayLog>,
   t: (key: string) => string,
 ): Promise<ScheduleResult> => {
   const Notif = await loadNotif();
   if (!Notif) return { ok: false, reason: 'unsupported' };
 
-  // If neither toggle is on, just clear any existing ones and bail out.
-  const wantsAny = settings.notifyPrePeriod || settings.notifyFertile;
+  const plan: NotificationItem[] = buildNotificationPlan(
+    predictions,
+    settings,
+    logs,
+  );
+
+  // Cancel any of our previous reminders.
   try {
     const existing = await Notif.getAllScheduledNotificationsAsync();
     for (const n of existing) {
-      if (n.content.data && (n.content.data as { tag?: string }).tag === TAG) {
+      const data = n.content.data as { tag?: string } | undefined;
+      if (data && data.tag === TAG) {
         await Notif.cancelScheduledNotificationAsync(n.identifier);
       }
     }
   } catch {
     // ignore
   }
-  if (!wantsAny) return { ok: true };
 
-  // Ensure permission.
+  if (plan.length === 0) return { ok: true, scheduledCount: 0 };
+
   const perm = await Notif.getPermissionsAsync();
   let granted = perm.granted;
   if (!granted) {
@@ -94,31 +72,24 @@ export const rescheduleNotifications = async (
   }
   if (!granted) return { ok: false, reason: 'denied' };
 
-  const plan = buildNotificationPlan(predictions, settings);
-  const schedule = async (when: Date, title: string, body: string) => {
-    await Notif.scheduleNotificationAsync({
-      content: { title, body, data: { tag: TAG } },
-      trigger: { type: Notif.SchedulableTriggerInputTypes.DATE, date: when },
-    });
-  };
-
-  try {
-    if (plan.prePeriodAt) {
-      await schedule(
-        plan.prePeriodAt,
-        t('app.title'),
-        t('today.cardUntilPeriod') + ' 1 ' + t('today.valueDays').replace('{{n}} ', ''),
-      );
+  let scheduled = 0;
+  for (const item of plan) {
+    try {
+      await Notif.scheduleNotificationAsync({
+        content: {
+          title: t(item.titleKey),
+          body: t(item.bodyKey),
+          data: { tag: TAG, key: item.key },
+        },
+        trigger: {
+          type: Notif.SchedulableTriggerInputTypes.DATE,
+          date: item.fireAt,
+        },
+      });
+      scheduled += 1;
+    } catch {
+      // continue scheduling others
     }
-    if (plan.fertileStartAt) {
-      await schedule(
-        plan.fertileStartAt,
-        t('app.title'),
-        t('today.cardFertileWindow') + ' ' + t('today.innerFertile'),
-      );
-    }
-    return { ok: true };
-  } catch {
-    return { ok: false, reason: 'error' };
   }
+  return { ok: true, scheduledCount: scheduled };
 };

@@ -40,7 +40,11 @@ export interface Settings {
   theme: 'auto' | 'light' | 'dark';
   showFertileWindow: boolean;
   notifyPrePeriod: boolean;
+  notifyPeriodStart: boolean;
+  notifyOvulationDay: boolean;
   notifyFertile: boolean;
+  notifyLatePeriod: boolean;
+  notifyDailyLog: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -51,7 +55,11 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'light',
   showFertileWindow: true,
   notifyPrePeriod: false,
+  notifyPeriodStart: false,
+  notifyOvulationDay: false,
   notifyFertile: false,
+  notifyLatePeriod: false,
+  notifyDailyLog: false,
 };
 
 export interface Profile {

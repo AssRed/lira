@@ -221,6 +221,10 @@
     "notifications": "Notifications",
     "notifyPrePeriod": "Remind me a day before period",
     "notifyFertile": "Remind me about fertile window",
+    "notifyPeriodStart": "Remind me on period start day",
+    "notifyOvulationDay": "Remind me about ovulation peak",
+    "notifyLatePeriod": "Notify when period is late",
+    "notifyDailyLog": "Daily reminder to log my day",
     "notifyPermissionDenied": "Allow notifications in your phone settings.",
     "notifyUnsupportedWeb": "Notifications work in the mobile app only.",
     "exportData": "Export data",
@@ -418,13 +422,55 @@
       "cancelled": "Cancelled"
     }
   },
-  "weekdays": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+  "weekdays": [
+    "Mon",
+    "Tue",
+    "Wed",
+    "Thu",
+    "Fri",
+    "Sat",
+    "Sun"
+  ],
   "months": [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
   ],
   "monthsGenitive": [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
-  ]
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+  ],
+  "notif": {
+    "prePeriodTitle": "Period starts tomorrow",
+    "prePeriodBody": "Get what you'll need ready for tonight and tomorrow.",
+    "periodStartTitle": "Period predicted to start today",
+    "periodStartBody": "Log your flow in Lira to keep predictions sharp.",
+    "ovulationTitle": "Ovulation peak today",
+    "ovulationBody": "The most fertile day of your cycle.",
+    "fertileStartTitle": "Fertile window has started",
+    "fertileStartBody": "High chance of conception over the next 7 days.",
+    "latePeriodTitle": "Your period is late",
+    "latePeriodBody": "If it has started, log the day — otherwise we'll keep watching.",
+    "dailyLogTitle": "Log today in Lira",
+    "dailyLogBody": "Flow, symptoms, mood — even a single tap counts."
+  }
 }
